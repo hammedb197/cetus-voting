@@ -22,6 +22,14 @@ st.set_page_config(
     layout="wide"
 )
 
+# Add auto-refresh
+st.markdown("""
+    <meta http-equiv="refresh" content="300">
+    <style>
+        footer {display: none !important;}
+    </style>
+""", unsafe_allow_html=True)
+
 # Initialize data fetcher in session state
 if 'data_fetcher' not in st.session_state:
     logger.info("Initializing data fetcher")
@@ -69,8 +77,11 @@ The funds will be transferred to a 4-of-6 multisig wallet controlled by:
 
 **Key Information:**
 - Voting Period: May 27th 1:00 PM PST - June 3rd 11:30 AM PST
-- Early Completion: Possible after 2 days if outcome cannot change
-- Quorum Requirement: >50% of total stake (excluding abstain)
+- Early Completion Criteria:
+  - Minimum 2 days of voting completed
+  - More than 50% of total stake participated in Yes/No votes (excluding abstain)
+  - "Yes" votes exceed the sum of "No" votes and remaining non-participating stake
+- Quorum Requirement: >50% of total stake must participate with Yes/No votes (excluding abstain)
 - Approval Requirement: "Yes" votes must exceed "No" votes
 """)
 
@@ -486,7 +497,7 @@ st.markdown("---")
 last_update_time = st.session_state.last_update.strftime("%Y-%m-%d %H:%M:%S UTC")
 st.markdown(f"""
 <div style='text-align: center'>
-    Data updates every 5 minutes | Last updated: {last_update_time}<br>
+    Page refreshes automatically every 5 minutes | Last updated: {last_update_time}<br>
     <small>
         For more information, see the <a href="https://blog.sui.io/cetus-incident-response-onchain-community-vote/" target="_blank">official Sui Foundation announcement</a> |
         View source code on <a href="https://github.com/hammedb197/cetus-voting" target="_blank">GitHub</a>

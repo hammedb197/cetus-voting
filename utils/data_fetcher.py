@@ -16,7 +16,7 @@ logger = logging.getLogger('cetus_vote_dashboard.data_fetcher')
 
 # Cache configuration
 CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', '.cache')
-CACHE_SIZE_LIMIT = 100 * 1024 * 1024  # 100 MB
+CACHE_SIZE_LIMIT = 10 * 1024 * 1024  # 10 MB
 CACHE_AGE_LIMIT = timedelta(minutes=5)  # Match the refresh interval
 
 def clear_old_cache():
