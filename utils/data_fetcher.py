@@ -7,6 +7,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from .sui_client import SuiClientWrapper
 from .types import VoteEvent, VotingPowerAnalysis, VotingSummary
+from pysui.sui.sui_types.collections import EventID
 from .constants import (
     QUORUM_THRESHOLD,
     VOTING_START,
@@ -37,29 +38,45 @@ def _fetch_vote_events(
     logger.debug(f"Timestamps in ms: {start_ms} to {end_ms}")
     
     while True:
-        batch = client.get_events_by_module(
-            module_name="governance_voting",
-            event_type="ValidatorVoted",
-            cursor=cursor,
-            limit=100
-        )
-        
-        logger.debug(f"Batch result: {batch}")
-        
-        if 'error' in batch or 'data' not in batch:
-            logger.warning("No data in batch or error in response")
-            break
+        try:
+            batch = client.get_events_by_module(
+                module_name="governance_voting",
+                event_type="ValidatorVoted",
+                cursor=cursor,
+                limit=100
+            )
             
-        events.extend(batch['data'])
-        logger.debug(f"Total events collected so far: {len(events)}")
-        
-        if not batch.get('hasNextPage'):
-            logger.debug("No more pages")
-            break
+            logger.debug(f"Batch result: {batch}")
             
-        cursor = batch.get('nextCursor')
-        logger.debug(f"Next cursor: {cursor}")
-        
+            if 'error' in batch or 'data' not in batch:
+                logger.warning("No data in batch or error in response")
+                break
+                
+            events.extend(batch['data'])
+            logger.debug(f"Total events collected so far: {len(events)}")
+            
+            if not batch.get('hasNextPage'):
+                logger.debug("No more pages")
+                break
+                
+            # Convert cursor dictionary to EventID object
+            next_cursor = batch.get('nextCursor')
+            if next_cursor:
+                try:
+                    cursor = EventID(
+                        tx_digest=next_cursor.get('txDigest'),
+                        event_seq=next_cursor.get('eventSeq')
+                    )
+                except Exception as e:
+                    logger.error(f"Error creating EventID from cursor: {str(e)}")
+                    break
+            else:
+                break
+                
+        except Exception as e:
+            logger.error(f"Error fetching events: {str(e)}")
+            break
+    
     logger.info(f"Total events fetched: {len(events)}")
     return events
 

@@ -18,7 +18,6 @@ RPC_RETRY_DELAY = 1  # seconds
 
 # Vote types
 VOTE_TYPES = ['Yes', 'No', 'Abstain']
-
 # Colors for visualizations
 VOTE_COLORS = {
     'Yes': '#00C853',    # Bright green
