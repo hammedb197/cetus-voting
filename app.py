@@ -72,6 +72,9 @@ The funds will be transferred to a 4-of-6 multisig wallet controlled by:
 - Early Completion: Possible after 2 days if outcome cannot change
 - Quorum Requirement: >50% of total stake (excluding abstain)
 - Approval Requirement: "Yes" votes must exceed "No" votes
+
+""")
+
 # Voting Status Banner
 status = voting_power_analysis['voting_status']
 status_color = {
