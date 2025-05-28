@@ -79,16 +79,18 @@ The funds will be transferred to a 4-of-6 multisig wallet controlled by:
 """)
 
 # Voting Status Banner
-status = voting_power_analysis['voting_status']
-status_color = {
-    "Not Started": "blue",
-    "In Progress": "orange",
-    "Can End Early": "green",
-    "Ended": "gray"
-}[status['status']]
+if voting_power_analysis and 'voting_status' in voting_power_analysis:
+    status = voting_power_analysis['voting_status']
+    status_color = {
+        "Not Started": "blue",
+        "In Progress": "orange",
+        "Can End Early": "green",
+        "Ended": "gray"
+    }[status['status']]
 
 # Main content
-if df.empty and status['status'] == "Not Started":
+if df.empty and (not voting_power_analysis or not voting_power_analysis.get('voting_status') or 
+                voting_power_analysis['voting_status']['status'] == "Not Started"):
     st.info("Voting has not started yet. Check back after May 27th 1:00 PM PST.")
 elif df.empty:
     st.warning("No voting events found in the selected time range.")
