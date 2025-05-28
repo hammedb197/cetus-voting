@@ -55,13 +55,16 @@ class SuiClientWrapper:
             The JSON response from the RPC call
         """
         try:
+            # Validate params to ensure no null values
+            validated_params = ['' if param is None else param for param in params]
+            
             response = requests.post(
                 self.rpc_url,
                 json={
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": method,
-                    "params": params
+                    "params": validated_params
                 },
                 headers={
                     "Content-Type": "application/json"
@@ -71,13 +74,24 @@ class SuiClientWrapper:
             result = response.json()
             
             if "error" in result:
-                logger.error(f"RPC error: {result['error']}")
+                error_msg = result.get('error', {})
+                logger.error(f"RPC error: {error_msg}")
+                logger.error(f"Method: {method}")
+                logger.error(f"Params: {validated_params}")
                 return {}
                 
             return result.get("result", {})
             
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Network error making RPC call: {str(e)}")
+            return {}
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in RPC response: {str(e)}")
+            return {}
         except Exception as e:
-            logger.error(f"Error making RPC call: {str(e)}")
+            logger.error(f"Unexpected error in RPC call: {str(e)}")
+            logger.error(f"Method: {method}")
+            logger.error(f"Params: {params}")
             return {}
         
     def get_validator_info_map(self) -> Dict[str, Dict[str, Any]]:

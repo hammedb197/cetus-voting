@@ -51,6 +51,17 @@ if (datetime.now() - st.session_state.last_update) > timedelta(minutes=5):
     except Exception as e:
         logger.error(f"Error updating data: {str(e)}")
         st.error(f"Error updating data: {str(e)}")
+        # Ensure we have default values if the update fails
+        if not st.session_state.voting_power_analysis:
+            st.session_state.voting_power_analysis = {
+                'participating_power': 0,
+                'total_power_excl_abstain': 1,  # Prevent division by zero
+                'vote_power': {'Yes': 0, 'No': 0, 'Abstain': 0},
+                'quorum_reached': False,
+                'quorum_threshold': 0,
+                'remaining_power': 0,
+                'voting_status': {'status': 'Not Started'}
+            }
 
 # Get data from session state
 df = st.session_state.df
