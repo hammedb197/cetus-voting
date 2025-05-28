@@ -2,22 +2,29 @@
 
 import os
 import shutil
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import pandas as pd
 import numpy as np
 from joblib import Memory
 from datetime import datetime, timedelta
 from functools import partial
 from .sui_client import SuiClientWrapper
+from .types import VoteEvent, VotingPowerAnalysis, VotingSummary
+from .constants import (
+    CACHE_DIR,
+    CACHE_SIZE_LIMIT,
+    CACHE_AGE_LIMIT,
+    QUORUM_THRESHOLD,
+    VOTING_START,
+    VOTING_END,
+    MIN_VOTING_DAYS,
+    EARLY_END_THRESHOLD,
+    VOTE_TYPES
+)
 import logging
 
 # Configure logger
 logger = logging.getLogger('cetus_vote_dashboard.data_fetcher')
-
-# Cache configuration
-CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', '.cache')
-CACHE_SIZE_LIMIT = 10 * 1024 * 1024  # 10 MB
-CACHE_AGE_LIMIT = timedelta(minutes=5)  # Match the refresh interval
 
 def clear_old_cache():
     """Clear cache files older than CACHE_AGE_LIMIT."""
@@ -54,13 +61,6 @@ def clear_old_cache():
 # Initialize cache with cleanup
 clear_old_cache()
 memory = Memory(CACHE_DIR, verbose=0)
-
-# Constants for voting thresholds and timing
-QUORUM_THRESHOLD = 0.50  # 50% of total stake must participate (excluding abstain)
-VOTING_START = datetime(2024, 5, 27, 13, 0)  # May 27th, 1:00 PM PST
-VOTING_END = datetime(2024, 6, 3, 11, 30)    # June 3rd, 11:30 AM PST
-MIN_VOTING_DAYS = 2  # Minimum voting period before early completion
-EARLY_END_THRESHOLD = 0.50  # 50% threshold for early completion
 
 # Create a cached function outside the class
 @memory.cache
@@ -132,19 +132,24 @@ class GovernanceDataFetcher:
         """
         return _cached_fetch_vote_events(self.client, start_time, end_time)
     
-    def get_recent_votes(self, hours: int = 24) -> pd.DataFrame:
-        """Get recent voting events.
+    def get_recent_votes(self, hours: Optional[int] = None) -> pd.DataFrame:
+        """Get voting events.
         
         Args:
-            hours: Number of hours to look back
+            hours: Optional number of hours to look back. If None, fetches all votes.
             
         Returns:
-            DataFrame containing recent votes
+            DataFrame containing votes
         """
-        end_time = datetime.utcnow()
-        start_time = end_time - timedelta(hours=hours)
+        if hours is not None:
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(hours=hours)
+        else:
+            # For all votes, use the voting period start and end times
+            start_time = VOTING_START
+            end_time = VOTING_END
         
-        logger.info(f"Getting recent votes for the last {hours} hours")
+        logger.info(f"Getting votes from {start_time} to {end_time}")
         logger.debug(f"Time range: {start_time} to {end_time}")
         
         events = self.fetch_vote_events(start_time, end_time)
@@ -347,20 +352,20 @@ class GovernanceDataFetcher:
             'herfindahl_index': hhi
         }
     
-    def get_proposal_votes(self, proposal_id: int) -> pd.DataFrame:
-        """Get all votes for a specific proposal.
-        
-        Args:
-            proposal_id: ID of the proposal
-            
-        Returns:
-            DataFrame containing votes for the proposal
-        """
-        # For now, we'll fetch all recent votes and filter
-        # In a production system, we'd want to query specifically for the proposal
-        df = self.get_recent_votes(hours=720)  # Last 30 days
-        
-        if df.empty:
-            return df
-            
-        return df[df['proposal_id'] == proposal_id] 
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+ 
+ 
+ 

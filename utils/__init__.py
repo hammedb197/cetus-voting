@@ -2,6 +2,6 @@
 
 from .sui_client import SuiClientWrapper
 from .data_fetcher import GovernanceDataFetcher
-from .analytics import GovernanceAnalytics
+from .analytics import VotingAnalytics
 
-__all__ = ['SuiClientWrapper', 'GovernanceDataFetcher', 'GovernanceAnalytics'] 
+__all__ = ['SuiClientWrapper', 'GovernanceDataFetcher', 'VotingAnalytics'] 

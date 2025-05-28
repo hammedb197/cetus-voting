@@ -3,6 +3,7 @@
 import os
 import json
 import requests
+import time
 from typing import List, Dict, Any, Optional
 from pysui.sui.sui_clients.sync_client import SuiClient
 from pysui.sui.sui_types.address import SuiAddress
@@ -12,27 +13,40 @@ from pysui.sui.sui_types.event_filter import MoveEventModuleQuery
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import logging
+from .types import ValidatorInfo, VoteEvent, RPCResponse
+from .constants import (
+    DEFAULT_RPC_URL,
+    DEFAULT_GOVERNANCE_OBJECT_ID,
+    RPC_BATCH_LIMIT,
+    RPC_RETRY_ATTEMPTS,
+    RPC_RETRY_DELAY,
+    CACHE_TTL
+)
 
 # Configure logger
 logger = logging.getLogger('cetus_vote_dashboard.sui_client')
 
 load_dotenv()
 
+class RPCError(Exception):
+    """Custom exception for RPC errors."""
+    pass
+
 class SuiClientWrapper:
     """Wrapper for the Sui client to handle governance-related queries."""
     
     def __init__(self) -> None:
         """Initialize the Sui client with configuration from environment."""
-        self.rpc_url = os.getenv('SUI_RPC_URL', 'https://fullnode.mainnet.sui.io')
+        self.rpc_url = os.getenv('SUI_RPC_URL', DEFAULT_RPC_URL)
         self.package_id = os.getenv('PACKAGE_ID')
         logger.info(f"Initialized SuiClientWrapper with RPC URL: {self.rpc_url}")
         logger.info(f"Package ID: {self.package_id}")
-        self.governance_object_id = "0x20f7aad455b839a7aec3be11143da7c7b6b481bfea89396424ea1eac02209e7a"
+        self.governance_object_id = DEFAULT_GOVERNANCE_OBJECT_ID
         config = SuiConfig.user_config(rpc_url=self.rpc_url)
         self.client = SuiClient(config)
-        self._validator_info_cache = {}
-        self._last_cache_update = None
-        self._cache_ttl = timedelta(minutes=5)
+        self._validator_info_cache: Dict[str, ValidatorInfo] = {}
+        self._last_cache_update: Optional[datetime] = None
+        self._cache_ttl = CACHE_TTL
         
     def _make_rpc_call(self, method: str, params: List[Any]) -> Dict[str, Any]:
         """Make a JSON-RPC call to the Sui network.
@@ -340,14 +354,14 @@ class SuiClientWrapper:
                 "proposal_id": proposal_id
             }
             
-    def subscribe_to_votes(self, handler) -> None:
-        """Subscribe to voting events in real-time.
-        
-        Args:
-            handler: Callback function to handle new vote events
-            
-        Note: This requires an async client, which we'll implement if needed
-        """
-        raise NotImplementedError(
-            "Real-time vote subscription requires async client implementation"
-        ) 
+    # def subscribe_to_votes(self, handler) -> None:
+        # """Subscribe to voting events in real-time.
+        # 
+        # Args:
+            # handler: Callback function to handle new vote events
+            # 
+        # Note: This requires an async client, which we'll implement if needed
+        # """
+        # raise NotImplementedError(
+            # "Real-time vote subscription requires async client implementation"
+        # ) 
