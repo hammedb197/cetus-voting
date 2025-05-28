@@ -19,8 +19,7 @@ from .constants import (
     DEFAULT_GOVERNANCE_OBJECT_ID,
     RPC_BATCH_LIMIT,
     RPC_RETRY_ATTEMPTS,
-    RPC_RETRY_DELAY,
-    CACHE_TTL
+    RPC_RETRY_DELAY
 )
 
 # Configure logger
@@ -44,9 +43,6 @@ class SuiClientWrapper:
         self.governance_object_id = DEFAULT_GOVERNANCE_OBJECT_ID
         config = SuiConfig.user_config(rpc_url=self.rpc_url)
         self.client = SuiClient(config)
-        self._validator_info_cache: Dict[str, ValidatorInfo] = {}
-        self._last_cache_update: Optional[datetime] = None
-        self._cache_ttl = CACHE_TTL
         
     def _make_rpc_call(self, method: str, params: List[Any]) -> Dict[str, Any]:
         """Make a JSON-RPC call to the Sui network.
@@ -84,51 +80,37 @@ class SuiClientWrapper:
             logger.error(f"Error making RPC call: {str(e)}")
             return {}
         
-    def get_validator_info_map(self, force_refresh: bool = False) -> Dict[str, Dict[str, Any]]:
+    def get_validator_info_map(self) -> Dict[str, Dict[str, Any]]:
         """Get a mapping of validator addresses to their information.
-        
-        Args:
-            force_refresh: Whether to force a refresh of the cache
             
         Returns:
             Dictionary mapping validator addresses to their information
         """
-        now = datetime.utcnow()
+        logger.info("Fetching validator information...")
+        result = self._make_rpc_call("suix_getLatestSuiSystemState", [])
         
-        # Check if we need to refresh the cache
-        if (force_refresh or 
-            not self._validator_info_cache or 
-            not self._last_cache_update or 
-            now - self._last_cache_update > self._cache_ttl):
-            
-            logger.info("Fetching fresh validator information...")
-            result = self._make_rpc_call("suix_getLatestSuiSystemState", [])
-            
-            # Reset cache
-            self._validator_info_cache = {}
-            
-            # Update cache with new data
-            active_validators = result.get('activeValidators', [])
-            logger.debug(f"Active validators: {active_validators}")
-            if active_validators:
-                for validator in active_validators:
-                    address = validator.get('suiAddress')
-                    if address:
-                        self._validator_info_cache[address] = {
-                            'name': validator.get('name', 'Unknown'),
-                            'description': validator.get('description', ''),
-                            'image_url': validator.get('imageUrl', ''),
-                            'project_url': validator.get('projectUrl', ''),
-                            'voting_power': validator.get('votingPower', '0'),
-                            'commission_rate': validator.get('commissionRate', '0'),
-                            'staking_pool_id': validator.get('stakingPoolId', ''),
-                            'has_voted': False  # Initialize voting status
-                        }
-            
-            self._last_cache_update = now
-            logger.info(f"Updated validator cache with {len(self._validator_info_cache)} entries")
+        validator_info = {}
         
-        return self._validator_info_cache
+        # Get validator data
+        active_validators = result.get('activeValidators', [])
+        logger.debug(f"Active validators: {active_validators}")
+        if active_validators:
+            for validator in active_validators:
+                address = validator.get('suiAddress')
+                if address:
+                    validator_info[address] = {
+                        'name': validator.get('name', 'Unknown'),
+                        'description': validator.get('description', ''),
+                        'image_url': validator.get('imageUrl', ''),
+                        'project_url': validator.get('projectUrl', ''),
+                        'voting_power': validator.get('votingPower', '0'),
+                        'commission_rate': validator.get('commissionRate', '0'),
+                        'staking_pool_id': validator.get('stakingPoolId', ''),
+                        'has_voted': False  # Initialize voting status
+                    }
+        
+        logger.info(f"Retrieved {len(validator_info)} validator entries")
+        return validator_info
     
     def get_validator_name(self, address: str) -> str:
         """Get a validator's name from their address.
@@ -139,11 +121,11 @@ class SuiClientWrapper:
         Returns:
             The validator's name or a shortened address if not found
         """
-        validator_info = self.get_validator_info_map().get(address, {})
-        if validator_info and validator_info.get('name'):
-            return validator_info['name']
-        
         # If no name found, return shortened address
+        if not address:
+            return "Unknown"
+            
+        # Return shortened address format if not found
         return f"{address[:6]}...{address[-4:]}"
     
     def update_voting_status(self, voting_addresses: List[str]) -> None:
@@ -152,9 +134,13 @@ class SuiClientWrapper:
         Args:
             voting_addresses: List of validator addresses that have voted
         """
-        validator_map = self.get_validator_info_map()
-        for address in validator_map:
-            validator_map[address]['has_voted'] = address in voting_addresses
+        validator_map = self._make_rpc_call("suix_getLatestSuiSystemState", [])
+        active_validators = validator_map.get('activeValidators', [])
+        
+        for validator in active_validators:
+            address = validator.get('suiAddress')
+            if address:
+                validator['has_voted'] = address in voting_addresses
     
     def get_voting_stats(self) -> Dict[str, int]:
         """Get statistics about validator voting.
@@ -162,9 +148,10 @@ class SuiClientWrapper:
         Returns:
             Dictionary containing voting statistics
         """
-        validator_map = self.get_validator_info_map()
-        total_validators = len(validator_map)
-        voted_count = sum(1 for v in validator_map.values() if v['has_voted'])
+        validator_map = self._make_rpc_call("suix_getLatestSuiSystemState", [])
+        active_validators = validator_map.get('activeValidators', [])
+        total_validators = len(active_validators)
+        voted_count = sum(1 for v in active_validators if v.get('has_voted', False))
         
         return {
             'total_validators': total_validators,

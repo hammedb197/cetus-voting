@@ -1,19 +1,13 @@
-"""Data fetcher for governance events with caching support."""
+"""Data fetcher for governance events."""
 
 import os
-import shutil
 from typing import List, Dict, Any, Tuple, Optional
 import pandas as pd
 import numpy as np
-from joblib import Memory
 from datetime import datetime, timedelta
-from functools import partial
 from .sui_client import SuiClientWrapper
 from .types import VoteEvent, VotingPowerAnalysis, VotingSummary
 from .constants import (
-    CACHE_DIR,
-    CACHE_SIZE_LIMIT,
-    CACHE_AGE_LIMIT,
     QUORUM_THRESHOLD,
     VOTING_START,
     VOTING_END,
@@ -26,50 +20,12 @@ import logging
 # Configure logger
 logger = logging.getLogger('cetus_vote_dashboard.data_fetcher')
 
-def clear_old_cache():
-    """Clear cache files older than CACHE_AGE_LIMIT."""
-    try:
-        if not os.path.exists(CACHE_DIR):
-            return
-            
-        now = datetime.now()
-        cache_size = 0
-        for root, _, files in os.walk(CACHE_DIR):
-            for file in files:
-                file_path = os.path.join(root, file)
-                file_stat = os.stat(file_path)
-                file_age = datetime.fromtimestamp(file_stat.st_mtime)
-                cache_size += file_stat.st_size
-                
-                # Remove files older than age limit
-                if now - file_age > CACHE_AGE_LIMIT:
-                    try:
-                        os.remove(file_path)
-                        logger.debug(f"Removed old cache file: {file_path}")
-                    except OSError as e:
-                        logger.warning(f"Failed to remove cache file {file_path}: {e}")
-                        
-        # If cache size exceeds limit, clear all cache
-        if cache_size > CACHE_SIZE_LIMIT:
-            shutil.rmtree(CACHE_DIR, ignore_errors=True)
-            os.makedirs(CACHE_DIR, exist_ok=True)
-            logger.info(f"Cleared entire cache as size ({cache_size / 1024 / 1024:.2f} MB) exceeded limit ({CACHE_SIZE_LIMIT / 1024 / 1024:.2f} MB)")
-            
-    except Exception as e:
-        logger.error(f"Error managing cache: {e}")
-
-# Initialize cache with cleanup
-clear_old_cache()
-memory = Memory(CACHE_DIR, verbose=0)
-
-# Create a cached function outside the class
-@memory.cache
-def _cached_fetch_vote_events(
+def _fetch_vote_events(
     client: SuiClientWrapper,
     start_time: datetime,
     end_time: datetime
 ) -> List[Dict[str, Any]]:
-    """Cached implementation of fetch_vote_events."""
+    """Real-time implementation of fetch_vote_events."""
     events = []
     cursor = None
     
@@ -108,13 +64,26 @@ def _cached_fetch_vote_events(
     return events
 
 class GovernanceDataFetcher:
-    """Handles fetching and caching of governance data."""
+    """Handles fetching of governance data."""
     
     def __init__(self) -> None:
         """Initialize the data fetcher with a Sui client."""
         self.client = SuiClientWrapper()
-        self.cache_ttl = timedelta(minutes=5)
-        clear_old_cache()  # Clear old cache on initialization
+        self._validator_info = None
+        self._last_validator_update = None
+        
+    def _get_validator_info(self, force_refresh: bool = False) -> Dict[str, Dict[str, Any]]:
+        """Get validator info, refreshing only when needed."""
+        now = datetime.utcnow()
+        if (force_refresh or 
+            not self._validator_info or 
+            not self._last_validator_update or 
+            (now - self._last_validator_update) > timedelta(minutes=5)):
+            
+            self._validator_info = self.client.get_validator_info_map()
+            self._last_validator_update = now
+            
+        return self._validator_info
         
     def fetch_vote_events(
         self,
@@ -130,7 +99,7 @@ class GovernanceDataFetcher:
         Returns:
             List of voting events
         """
-        return _cached_fetch_vote_events(self.client, start_time, end_time)
+        return _fetch_vote_events(self.client, start_time, end_time)
     
     def get_recent_votes(self, hours: Optional[int] = None) -> pd.DataFrame:
         """Get voting events.
@@ -163,15 +132,23 @@ class GovernanceDataFetcher:
         
         # Convert timestamp to datetime
         if 'timestamp' in df.columns:
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
             logger.debug("Converted timestamps to datetime")
         else:
             logger.warning("No timestamp column found in events")
         
         # Add validator names and update voting status
         voting_addresses = df['validator_address'].unique().tolist()
-        self.client.update_voting_status(voting_addresses)
-        df['validator_name'] = df['validator_address'].apply(self.client.get_validator_name)
+        validator_info = self._get_validator_info(force_refresh=True)
+        
+        # Update voting status in validator info
+        for addr in validator_info:
+            validator_info[addr]['has_voted'] = addr in voting_addresses
+            
+        # Add validator names to DataFrame
+        df['validator_name'] = df['validator_address'].apply(
+            lambda x: validator_info.get(x, {}).get('name', f"{x[:6]}...{x[-4:]}")
+        )
         
         return df
     
@@ -184,14 +161,14 @@ class GovernanceDataFetcher:
         Returns:
             Dictionary containing voting power analysis
         """
-        validator_map = self.client.get_validator_info_map()
-        total_power = sum(int(info['voting_power']) for info in validator_map.values())
+        validator_info = self._get_validator_info()
+        total_power = sum(int(info['voting_power']) for info in validator_info.values())
         
         # Calculate power by vote type
         vote_power = {'Yes': 0, 'No': 0, 'Abstain': 0}
         for _, row in df.iterrows():
-            validator_info = validator_map.get(row['validator_address'], {})
-            power = int(validator_info.get('voting_power', 0))
+            validator = validator_info.get(row['validator_address'], {})
+            power = int(validator.get('voting_power', 0))
             vote_power[row['vote']] += power
         
         # Calculate total participating power (excluding abstain)
@@ -215,7 +192,7 @@ class GovernanceDataFetcher:
                 'voting_power': int(info['voting_power']),
                 'power_percentage': (int(info['voting_power']) / total_power * 100)
             }
-            for addr, info in validator_map.items()
+            for addr, info in validator_info.items()
             if not info['has_voted']
         ]
         not_voted.sort(key=lambda x: x['voting_power'], reverse=True)
@@ -270,9 +247,11 @@ class GovernanceDataFetcher:
         Returns:
             Dictionary containing voting statistics and validator information
         """
-        # Get base statistics
-        stats = self.client.get_voting_stats()
-        validator_map = self.client.get_validator_info_map()
+        validator_info = self._get_validator_info()
+        
+        # Calculate statistics directly from validator info
+        total_validators = len(validator_info)
+        voted_count = sum(1 for info in validator_info.values() if info['has_voted'])
         
         # Get list of validators who haven't voted
         not_voted = [
@@ -281,7 +260,7 @@ class GovernanceDataFetcher:
                 'name': info['name'],
                 'voting_power': info['voting_power']
             }
-            for addr, info in validator_map.items()
+            for addr, info in validator_info.items()
             if not info['has_voted']
         ]
         
@@ -289,22 +268,22 @@ class GovernanceDataFetcher:
         not_voted.sort(key=lambda x: int(x['voting_power']), reverse=True)
         
         # Calculate total voting power and participation rate
-        total_voting_power = sum(int(info['voting_power']) for info in validator_map.values())
+        total_voting_power = sum(int(info['voting_power']) for info in validator_info.values())
         voted_power = sum(
             int(info['voting_power']) 
-            for info in validator_map.values() 
+            for info in validator_info.values() 
             if info['has_voted']
         )
         
         # Calculate power concentration
-        powers = [int(info['voting_power']) for info in validator_map.values()]
+        powers = [int(info['voting_power']) for info in validator_info.values()]
         power_concentration = self._calculate_power_concentration(powers)
         
         return {
-            'total_validators': stats['total_validators'],
-            'voted_count': stats['voted_count'],
-            'not_voted_count': stats['not_voted_count'],
-            'participation_rate': (stats['voted_count'] / stats['total_validators'] * 100) if stats['total_validators'] > 0 else 0,
+            'total_validators': total_validators,
+            'voted_count': voted_count,
+            'not_voted_count': total_validators - voted_count,
+            'participation_rate': (voted_count / total_validators * 100) if total_validators > 0 else 0,
             'voting_power_rate': (voted_power / total_voting_power * 100) if total_voting_power > 0 else 0,
             'total_voting_power': total_voting_power,
             'voted_power': voted_power,

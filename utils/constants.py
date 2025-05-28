@@ -1,17 +1,6 @@
 """Constants and configuration values for the Cetus Vote Dashboard."""
 
 from datetime import datetime, timedelta
-import os
-import tempfile
-
-# Cache directory configuration
-CACHE_DIR = os.path.join(tempfile.gettempdir(), 'cetus_vote_cache')
-os.makedirs(CACHE_DIR, exist_ok=True)
-
-# Cache configuration
-CACHE_SIZE_LIMIT = 10 * 1024 * 1024  # 10 MB
-CACHE_AGE_LIMIT = timedelta(minutes=5)  # Match the refresh interval
-CACHE_TTL = timedelta(minutes=5)
 
 # Voting thresholds and timing
 QUORUM_THRESHOLD = 0.50  # 50% of total stake must participate (excluding abstain)

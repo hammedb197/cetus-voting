@@ -29,19 +29,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Initialize data fetcher in session state
+# Initialize data fetcher and session state variables
 if 'data_fetcher' not in st.session_state:
     logger.info("Initializing data fetcher")
     st.session_state.data_fetcher = GovernanceDataFetcher()
-
-# Initialize data cache in session state if not present
-if 'last_update' not in st.session_state:
     st.session_state.last_update = datetime.now() - timedelta(minutes=6)
-if 'df' not in st.session_state:
     st.session_state.df = pd.DataFrame()
-if 'voting_summary' not in st.session_state:
     st.session_state.voting_summary = {}
-if 'voting_power_analysis' not in st.session_state:
     st.session_state.voting_power_analysis = {}
 
 # Update data every 5 minutes
