@@ -2,6 +2,8 @@
 
 A Streamlit dashboard for tracking governance voting events on the Sui blockchain for package `0x4eb9c090cd484778411c32894ec7b936793deaab69f114e9b47d07a58e8f5e5d`.
 
+Source code available at: [github.com/hammedb197/cetus-voting](https://github.com/hammedb197/cetus-voting)
+
 ## Features
 
 - Real-time monitoring of governance voting events
@@ -15,7 +17,7 @@ A Streamlit dashboard for tracking governance voting events on the Sui blockchai
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/hammedb197/cetus-voting.git
 cd cetus-voting
 ```
 

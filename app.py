@@ -72,8 +72,6 @@ The funds will be transferred to a 4-of-6 multisig wallet controlled by:
 - Early Completion: Possible after 2 days if outcome cannot change
 - Quorum Requirement: >50% of total stake (excluding abstain)
 - Approval Requirement: "Yes" votes must exceed "No" votes
-""")
-
 # Voting Status Banner
 status = voting_power_analysis['voting_status']
 status_color = {
@@ -487,6 +485,9 @@ last_update_time = st.session_state.last_update.strftime("%Y-%m-%d %H:%M:%S UTC"
 st.markdown(f"""
 <div style='text-align: center'>
     Data updates every 5 minutes | Last updated: {last_update_time}<br>
-    <small>For more information, see the <a href="https://blog.sui.io/cetus-incident-response-onchain-community-vote/" target="_blank">official Sui Foundation announcement</a></small>
+    <small>
+        For more information, see the <a href="https://blog.sui.io/cetus-incident-response-onchain-community-vote/" target="_blank">official Sui Foundation announcement</a> |
+        View source code on <a href="https://github.com/hammedb197/cetus-voting" target="_blank">GitHub</a>
+    </small>
 </div>
 """, unsafe_allow_html=True) 
