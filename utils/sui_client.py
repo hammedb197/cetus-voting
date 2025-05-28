@@ -7,7 +7,7 @@ import time
 from typing import List, Dict, Any, Optional
 from pysui.sui.sui_clients.sync_client import SuiClient
 from pysui.sui.sui_types.address import SuiAddress
-from pysui.sui.sui_types.collections import SuiMap
+from pysui.sui.sui_types.collections import SuiMap, EventID
 from pysui.sui.sui_config import SuiConfig
 from pysui.sui.sui_types.event_filter import MoveEventModuleQuery
 from datetime import datetime, timedelta
@@ -38,6 +38,13 @@ class SuiClientWrapper:
         """Initialize the Sui client with configuration from environment."""
         self.rpc_url = os.getenv('SUI_RPC_URL', DEFAULT_RPC_URL)
         self.package_id = os.getenv('PACKAGE_ID')
+        
+        # Validate required environment variables
+        if not self.package_id:
+            error_msg = "PACKAGE_ID environment variable is not set. Please set it in your environment or .env file."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+            
         logger.info(f"Initialized SuiClientWrapper with RPC URL: {self.rpc_url}")
         logger.info(f"Package ID: {self.package_id}")
         self.governance_object_id = DEFAULT_GOVERNANCE_OBJECT_ID
@@ -163,30 +170,19 @@ class SuiClientWrapper:
         self,
         module_name: str = "governance_voting",
         event_type: str = "ValidatorVoted",
-        cursor: Optional[str] = None,
+        cursor: Optional[Any] = None,
         limit: int = 100,
         descending: bool = True,
         start_time: Optional[int] = None,
         end_time: Optional[int] = None
     ) -> Dict[str, Any]:
-        """Get voting events from the governance module.
-        
-        Args:
-            module_name: Name of the module to query events from (default: governance_voting)
-            event_type: Type of event to query (default: ValidatorVoted)
-            cursor: Pagination cursor
-            limit: Maximum number of events to return
-            descending: Whether to return events in descending order
-            start_time: Start time in milliseconds since epoch
-            end_time: End time in milliseconds since epoch
-            
-        Returns:
-            Dictionary containing events and pagination info
-        """
+        """Get voting events from the governance module."""
         logger.debug(f"\nQuerying events with parameters:")
         logger.debug(f"Module: {module_name}")
         logger.debug(f"Event type: {event_type}")
         logger.debug(f"Package ID: {self.package_id}")
+        logger.debug(f"Cursor type: {type(cursor)}")
+        logger.debug(f"Cursor value: {cursor}")
         
         # Create event filter query using MoveEventModuleQuery
         event_filter = MoveEventModuleQuery(
@@ -196,46 +192,62 @@ class SuiClientWrapper:
         
         logger.debug(f"\nEvent filter created: {event_filter}")
         
-        # Get events using the proper query structure
-        result = self.client.get_events(
-            query=event_filter,
-            cursor=cursor or "",
-            limit=limit,
-            descending_order=descending
-        )
-        
-        logger.debug(f"\nQuery result status: {result.is_ok()}")
-        if not result.is_ok():
-            logger.error(f"Error: {result.result_string}")
-            return {'error': result.result_string}
+        try:
+            # Get events using the proper query structure
+            result = self.client.get_events(
+                query=event_filter,
+                cursor=cursor if cursor is not None else "",
+                limit=limit,
+                descending_order=descending
+            )
             
-        logger.debug(f"Result data: {result.result_data}")
-        
-        # Transform the EventQueryEnvelope to a dictionary format
-        if result.is_ok() and result.result_data:
-            try:
-                events_data = []
-                # Access the data attribute directly from EventQueryEnvelope
-                for event in result.result_data.data:
-                    event_dict = {
-                        'validator_address': event.parsed_json.get('validator_address'),
-                        'vote': event.parsed_json.get('vote'),
-                        'timestamp': event.timestamp_ms,
-                        'transaction_module': event.transaction_module,
-                        'event_type': event.event_type,
-                        'event_id': event.event_id,
-                        'sender': event.sender
+            logger.debug(f"\nQuery result status: {result.is_ok()}")
+            if not result.is_ok():
+                logger.error(f"Error: {result.result_string}")
+                return {'error': result.result_string}
+            
+            # Add detailed logging of the result structure
+            logger.debug("Result data structure:")
+            logger.debug(f"Result type: {type(result.result_data)}")
+            if result.result_data and hasattr(result.result_data, 'data'):
+                logger.debug(f"First event type: {type(result.result_data.data[0]) if result.result_data.data else 'No events'}")
+                if result.result_data.data:
+                    logger.debug(f"First event structure: {vars(result.result_data.data[0])}")
+            
+            # Transform the EventQueryEnvelope to a dictionary format
+            if result.is_ok() and result.result_data:
+                try:
+                    events_data = []
+                    for event in result.result_data.data:
+                        # Log the event structure
+                        logger.debug(f"Processing event: {vars(event)}")
+                        logger.debug(f"Event ID type: {type(event.event_id)}")
+                        logger.debug(f"Event ID structure: {vars(event.event_id) if hasattr(event.event_id, '__dict__') else event.event_id}")
+                        
+                        event_dict = {
+                            'validator_address': event.parsed_json.get('validator_address'),
+                            'vote': event.parsed_json.get('vote'),
+                            'timestamp': event.timestamp_ms,
+                            'transaction_module': event.transaction_module,
+                            'event_type': event.event_type,
+                            'event_id': event.event_id,  # Store the raw event_id for now
+                            'sender': event.sender
+                        }
+                        events_data.append(event_dict)
+                    
+                    return {
+                        'data': events_data,
+                        'hasNextPage': result.result_data.has_next_page,
+                        'nextCursor': result.result_data.next_cursor  # Store the raw cursor
                     }
-                    events_data.append(event_dict)
-                
-                return {
-                    'data': events_data,
-                    'hasNextPage': result.result_data.has_next_page,
-                    'nextCursor': result.result_data.next_cursor
-                }
-            except Exception as e:
-                logger.error(f"Error processing events: {str(e)}")
-                return {'error': f'Failed to process events: {str(e)}'}
+                except Exception as e:
+                    logger.error(f"Error processing events: {str(e)}")
+                    logger.error(f"Event being processed: {vars(event) if 'event' in locals() else 'No event'}")
+                    return {'error': f'Failed to process events: {str(e)}'}
+        except Exception as e:
+            logger.error(f"Error in get_events: {str(e)}")
+            logger.error(f"Parameters: module={module_name}, event_type={event_type}, cursor={cursor}, limit={limit}")
+            return {'error': f'Failed to get events: {str(e)}'}
             
         return {'error': 'No data available'}
     

@@ -59,22 +59,34 @@ def _fetch_vote_events(
                 logger.debug("No more pages")
                 break
                 
-            # Convert cursor dictionary to EventID object
+            # Get the next cursor
             next_cursor = batch.get('nextCursor')
             if next_cursor:
                 try:
-                    cursor = EventID(
-                        tx_digest=next_cursor.get('txDigest'),
-                        event_seq=next_cursor.get('eventSeq')
-                    )
+                    # Create EventID with the correct parameter order
+                    if isinstance(next_cursor, dict):
+                        event_seq = str(next_cursor.get('eventSeq', '0'))
+                        tx_seq = str(next_cursor.get('txDigest', ''))
+                        cursor = EventID(
+                            event_seq=event_seq,  # First parameter: event sequence
+                            tx_seq=tx_seq  # Second parameter: transaction sequence
+                        )
+                        logger.debug(f"Created cursor with event_seq: {event_seq}, tx_seq: {tx_seq}")
+                    elif isinstance(next_cursor, str):
+                        cursor = next_cursor
+                    else:
+                        cursor = next_cursor
+                    logger.debug(f"Created cursor: {cursor}")
                 except Exception as e:
-                    logger.error(f"Error creating EventID from cursor: {str(e)}")
+                    logger.error(f"Error creating cursor: {str(e)}")
+                    logger.error(f"Cursor data: {next_cursor}")
                     break
             else:
                 break
                 
         except Exception as e:
             logger.error(f"Error fetching events: {str(e)}")
+            logger.error(f"Full error details: {str(e)}")
             break
     
     logger.info(f"Total events fetched: {len(events)}")
@@ -85,9 +97,16 @@ class GovernanceDataFetcher:
     
     def __init__(self) -> None:
         """Initialize the data fetcher with a Sui client."""
-        self.client = SuiClientWrapper()
-        self._validator_info = None
-        self._last_validator_update = None
+        try:
+            self.client = SuiClientWrapper()
+            self._validator_info = None
+            self._last_validator_update = None
+        except ValueError as e:
+            logger.error(f"Failed to initialize SuiClientWrapper: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error initializing data fetcher: {str(e)}")
+            raise
         
     def _get_validator_info(self, force_refresh: bool = False) -> Dict[str, Dict[str, Any]]:
         """Get validator info, refreshing only when needed."""
