@@ -3,7 +3,7 @@
 import pandas as pd
 import plotly.graph_objects as go
 from typing import Dict, List, Tuple, Any, Optional
-from datetime import datetime
+from datetime import datetime, UTC
 from .types import VotingPowerAnalysis, VotingSummary
 from .constants import VOTE_TYPES, VOTE_COLORS, PIE_CHART_COLORS
 

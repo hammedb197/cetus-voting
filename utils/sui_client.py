@@ -10,7 +10,7 @@ from pysui.sui.sui_types.address import SuiAddress
 from pysui.sui.sui_types.collections import SuiMap, EventID
 from pysui.sui.sui_config import SuiConfig
 from pysui.sui.sui_types.event_filter import MoveEventModuleQuery
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from dotenv import load_dotenv
 import logging
 from .types import ValidatorInfo, VoteEvent, RPCResponse
@@ -37,19 +37,24 @@ class SuiClientWrapper:
     def __init__(self) -> None:
         """Initialize the Sui client with configuration from environment."""
         self.rpc_url = os.getenv('SUI_RPC_URL', DEFAULT_RPC_URL)
-        self.package_id = os.getenv('PACKAGE_ID')
+        self.package_id = os.getenv('PACKAGE_ID', DEFAULT_GOVERNANCE_OBJECT_ID)
         
-        # Validate required environment variables
-        if not self.package_id:
-            error_msg = "PACKAGE_ID environment variable is not set. Please set it in your environment or .env file."
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-            
         logger.info(f"Initialized SuiClientWrapper with RPC URL: {self.rpc_url}")
         logger.info(f"Package ID: {self.package_id}")
         self.governance_object_id = DEFAULT_GOVERNANCE_OBJECT_ID
-        config = SuiConfig.user_config(rpc_url=self.rpc_url)
-        self.client = SuiClient(config)
+        
+        try:
+            config = SuiConfig.user_config(rpc_url=self.rpc_url)
+            self.client = SuiClient(config)
+            # Test the connection
+            result = self._make_rpc_call("suix_getLatestSuiSystemState", [])
+            if not result:
+                logger.error("Failed to connect to Sui RPC endpoint")
+            else:
+                logger.info("Successfully connected to Sui RPC endpoint")
+        except Exception as e:
+            logger.error(f"Error initializing Sui client: {str(e)}")
+            # Don't raise the error, let the app continue with degraded functionality
         
     def _make_rpc_call(self, method: str, params: List[Any]) -> Dict[str, Any]:
         """Make a JSON-RPC call to the Sui network.
@@ -61,45 +66,71 @@ class SuiClientWrapper:
         Returns:
             The JSON response from the RPC call
         """
-        try:
-            # Validate params to ensure no null values
-            validated_params = ['' if param is None else param for param in params]
-            
-            response = requests.post(
-                self.rpc_url,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": method,
-                    "params": validated_params
-                },
-                headers={
-                    "Content-Type": "application/json"
-                }
-            )
-            response.raise_for_status()
-            result = response.json()
-            
-            if "error" in result:
-                error_msg = result.get('error', {})
-                logger.error(f"RPC error: {error_msg}")
-                logger.error(f"Method: {method}")
-                logger.error(f"Params: {validated_params}")
-                return {}
+        for attempt in range(RPC_RETRY_ATTEMPTS):
+            try:
+                # Validate params to ensure no null values
+                validated_params = ['' if param is None else param for param in params]
                 
-            return result.get("result", {})
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Network error making RPC call: {str(e)}")
-            return {}
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error in RPC response: {str(e)}")
-            return {}
-        except Exception as e:
-            logger.error(f"Unexpected error in RPC call: {str(e)}")
-            logger.error(f"Method: {method}")
-            logger.error(f"Params: {params}")
-            return {}
+                logger.info(f"Making RPC call to {self.rpc_url} (attempt {attempt + 1}/{RPC_RETRY_ATTEMPTS})")
+                logger.info(f"Method: {method}")
+                logger.info(f"Params: {validated_params}")
+                
+                response = requests.post(
+                    self.rpc_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": method,
+                        "params": validated_params
+                    },
+                    headers={
+                        "Content-Type": "application/json"
+                    },
+                    timeout=10  # Add timeout
+                )
+                response.raise_for_status()
+                result = response.json()
+                
+                logger.info(f"RPC response status: {response.status_code}")
+                logger.debug(f"RPC response: {result}")
+                
+                if "error" in result:
+                    error_msg = result.get('error', {})
+                    logger.error(f"RPC error: {error_msg}")
+                    logger.error(f"Method: {method}")
+                    logger.error(f"Params: {validated_params}")
+                    if attempt < RPC_RETRY_ATTEMPTS - 1:
+                        time.sleep(RPC_RETRY_DELAY * (attempt + 1))  # Exponential backoff
+                        continue
+                    return {}
+                    
+                return result.get("result", {})
+                
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Network error making RPC call: {str(e)}")
+                logger.error(f"URL: {self.rpc_url}")
+                logger.error(f"Method: {method}")
+                if attempt < RPC_RETRY_ATTEMPTS - 1:
+                    time.sleep(RPC_RETRY_DELAY * (attempt + 1))  # Exponential backoff
+                    continue
+                return {}
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decode error in RPC response: {str(e)}")
+                logger.error(f"Response text: {response.text if 'response' in locals() else 'No response'}")
+                if attempt < RPC_RETRY_ATTEMPTS - 1:
+                    time.sleep(RPC_RETRY_DELAY * (attempt + 1))  # Exponential backoff
+                    continue
+                return {}
+            except Exception as e:
+                logger.error(f"Unexpected error in RPC call: {str(e)}")
+                logger.error(f"Method: {method}")
+                logger.error(f"Params: {params}")
+                if attempt < RPC_RETRY_ATTEMPTS - 1:
+                    time.sleep(RPC_RETRY_DELAY * (attempt + 1))  # Exponential backoff
+                    continue
+                return {}
+        
+        return {}
         
     def get_validator_info_map(self) -> Dict[str, Dict[str, Any]]:
         """Get a mapping of validator addresses to their information.
@@ -108,30 +139,59 @@ class SuiClientWrapper:
             Dictionary mapping validator addresses to their information
         """
         logger.info("Fetching validator information...")
-        result = self._make_rpc_call("suix_getLatestSuiSystemState", [])
-        
-        validator_info = {}
-        
-        # Get validator data
-        active_validators = result.get('activeValidators', [])
-        logger.debug(f"Active validators: {active_validators}")
-        if active_validators:
+        try:
+            result = self._make_rpc_call("suix_getLatestSuiSystemState", [])
+            if not result:
+                logger.error("Failed to get system state - empty response")
+                return {}
+
+            logger.info(f"System state response: {result.keys()}")
+            validator_info = {}
+            
+            # Get validator data
+            active_validators = result.get('activeValidators', [])
+            logger.info(f"Active validators found: {len(active_validators)}")
+            
+            if not active_validators:
+                logger.error("No active validators found in system state")
+                logger.error(f"System state content: {result}")
+                return {}
+                
             for validator in active_validators:
+                if not isinstance(validator, dict):
+                    logger.warning(f"Invalid validator data type: {type(validator)}")
+                    logger.warning(f"Validator data: {validator}")
+                    continue
+                    
                 address = validator.get('suiAddress')
-                if address:
-                    validator_info[address] = {
-                        'name': validator.get('name', 'Unknown'),
-                        'description': validator.get('description', ''),
-                        'image_url': validator.get('imageUrl', ''),
-                        'project_url': validator.get('projectUrl', ''),
-                        'voting_power': validator.get('votingPower', '0'),
-                        'commission_rate': validator.get('commissionRate', '0'),
-                        'staking_pool_id': validator.get('stakingPoolId', ''),
-                        'has_voted': False  # Initialize voting status
-                    }
-        
-        logger.info(f"Retrieved {len(validator_info)} validator entries")
-        return validator_info
+                if not address:
+                    logger.warning("Validator missing address")
+                    logger.warning(f"Validator data: {validator}")
+                    continue
+                    
+                voting_power = validator.get('votingPower', '0')
+                logger.debug(f"Processing validator {address} with power {voting_power}")
+                
+                validator_info[address] = {
+                    'name': validator.get('name', 'Unknown'),
+                    'description': validator.get('description', ''),
+                    'image_url': validator.get('imageUrl', ''),
+                    'project_url': validator.get('projectUrl', ''),
+                    'voting_power': voting_power,
+                    'commission_rate': validator.get('commissionRate', '0'),
+                    'staking_pool_id': validator.get('stakingPoolId', ''),
+                    'has_voted': False  # Initialize voting status
+                }
+            
+            logger.info(f"Retrieved {len(validator_info)} validator entries")
+            logger.info(f"Total voting power: {sum(int(info.get('voting_power', 0)) for info in validator_info.values())}")
+            return validator_info
+            
+        except Exception as e:
+            logger.error(f"Error fetching validator info: {str(e)}")
+            logger.error(f"Full error details: {str(e.__class__.__name__)}: {str(e)}")
+            logger.error(f"Result content: {result if 'result' in locals() else 'No result'}")
+            return {}
     
     def get_validator_name(self, address: str) -> str:
         """Get a validator's name from their address.
@@ -238,9 +298,15 @@ class SuiClientWrapper:
                         logger.debug(f"Event ID type: {type(event.event_id)}")
                         logger.debug(f"Event ID structure: {vars(event.event_id) if hasattr(event.event_id, '__dict__') else event.event_id}")
                         
+                        # Get and validate vote value
+                        vote = event.parsed_json.get('vote')
+                        if vote not in ['Yes', 'No', 'Abstain']:
+                            logger.warning(f"Invalid vote value: {vote}, event: {vars(event)}")
+                            continue
+                        
                         event_dict = {
                             'validator_address': event.parsed_json.get('validator_address'),
-                            'vote': event.parsed_json.get('vote'),
+                            'vote': vote,
                             'timestamp': event.timestamp_ms,
                             'transaction_module': event.transaction_module,
                             'event_type': event.event_type,

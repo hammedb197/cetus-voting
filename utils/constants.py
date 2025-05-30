@@ -1,11 +1,11 @@
 """Constants and configuration values for the Cetus Vote Dashboard."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 # Voting thresholds and timing
 QUORUM_THRESHOLD = 0.50  # 50% of total stake must participate (excluding abstain)
-VOTING_START = datetime(2025, 5, 27, 13, 0)  # May 27th, 1:00 PM PST
-VOTING_END = datetime(2025, 6, 3, 11, 30)    # June 3rd, 11:30 AM PST
+VOTING_START = datetime(2025, 5, 27, 13, 0, tzinfo=UTC)  # May 27th, 1:00 PM PST
+VOTING_END = datetime(2025, 6, 3, 11, 30, tzinfo=UTC)    # June 3rd, 11:30 AM PST
 MIN_VOTING_DAYS = 2  # Minimum voting period before early completion
 EARLY_END_THRESHOLD = 0.50  # 50% threshold for early completion
 
