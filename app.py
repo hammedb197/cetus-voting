@@ -3,8 +3,9 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from utils import GovernanceDataFetcher, VotingAnalytics
+from utils.constants import VOTING_START, VOTING_END
 import logging
 
 # Configure logging
@@ -33,20 +34,36 @@ st.markdown("""
 if 'data_fetcher' not in st.session_state:
     logger.info("Initializing data fetcher")
     st.session_state.data_fetcher = GovernanceDataFetcher()
-    st.session_state.last_update = datetime.now() - timedelta(minutes=6)
+    st.session_state.last_update = datetime.now(UTC) - timedelta(minutes=6)
     st.session_state.df = pd.DataFrame()
     st.session_state.voting_summary = {}
-    st.session_state.voting_power_analysis = {}
+    st.session_state.voting_power_analysis = {
+        'participating_power': 0,
+        'total_power_excl_abstain': 1,  # Prevent division by zero
+        'vote_power': {'Yes': 0, 'No': 0, 'Abstain': 0},
+        'vote_power_percentage': {'Yes': 0, 'No': 0, 'Abstain': 0},
+        'quorum_reached': False,
+        'quorum_threshold': 0,
+        'remaining_power': 0,
+        'voting_status': {
+            'status': "Not Started",
+            'start_time': VOTING_START,
+            'end_time': VOTING_END,
+            'min_days_met': False,
+            'can_complete_early': False,
+            'time_remaining': VOTING_END - datetime.now(UTC)
+        }
+    }
 
 # Update data every 5 minutes
-if (datetime.now() - st.session_state.last_update) > timedelta(minutes=5):
+if (datetime.now(UTC) - st.session_state.last_update) > timedelta(minutes=5):
     try:
         logger.info("Fetching new data")
         st.session_state.df = st.session_state.data_fetcher.get_recent_votes()
         st.session_state.voting_summary = st.session_state.data_fetcher.get_voting_summary()
-        if not st.session_state.df.empty:
-            st.session_state.voting_power_analysis = st.session_state.data_fetcher.analyze_voting_power(st.session_state.df)
-        st.session_state.last_update = datetime.now()
+        # Always analyze voting power, even if DataFrame is empty
+        st.session_state.voting_power_analysis = st.session_state.data_fetcher.analyze_voting_power(st.session_state.df)
+        st.session_state.last_update = datetime.now(UTC)
         logger.info("Data update completed successfully")
     except Exception as e:
         logger.error(f"Error updating data: {str(e)}")
@@ -57,10 +74,34 @@ if (datetime.now() - st.session_state.last_update) > timedelta(minutes=5):
                 'participating_power': 0,
                 'total_power_excl_abstain': 1,  # Prevent division by zero
                 'vote_power': {'Yes': 0, 'No': 0, 'Abstain': 0},
+                'vote_power_percentage': {'Yes': 0, 'No': 0, 'Abstain': 0},
                 'quorum_reached': False,
                 'quorum_threshold': 0,
                 'remaining_power': 0,
-                'voting_status': {'status': 'Not Started'}
+                'voting_status': {
+                    'status': "Error",
+                    'start_time': VOTING_START,
+                    'end_time': VOTING_END,
+                    'min_days_met': False,
+                    'can_complete_early': False,
+                    'time_remaining': VOTING_END - datetime.now(UTC)
+                }
+            }
+        if not st.session_state.voting_summary:
+            st.session_state.voting_summary = {
+                'total_validators': 0,
+                'voted_count': 0,
+                'not_voted_count': 0,
+                'participation_rate': 0,
+                'voting_power_rate': 0,
+                'total_voting_power': 0,
+                'voted_power': 0,
+                'not_voted_validators': [],
+                'power_concentration': {
+                    'gini_coefficient': 0.0,
+                    'top_10_percentage': 0.0,
+                    'herfindahl_index': 0.0
+                }
             }
 
 # Get data from session state
@@ -96,7 +137,8 @@ if voting_power_analysis and 'voting_status' in voting_power_analysis:
         "Not Started": "blue",
         "In Progress": "orange",
         "Can End Early": "green",
-        "Ended": "gray"
+        "Ended": "gray",
+        "Error": "red"  # Add color for error state
     }[status['status']]
 
 # Main content
